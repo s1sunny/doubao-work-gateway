@@ -31,3 +31,5 @@ dist/
 # Exported credential backups are private, even when copied into this checkout.
 doubao-accounts-*.json
 doubao-nodes-*.json
+
+*.bak-*
