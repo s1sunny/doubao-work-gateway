@@ -77,6 +77,11 @@ export async function* decodeEvents(response,{signal,idleMs=60000}={}){
   for await(const f of frames(reader,{signal,idleMs})){
    let v;
    try{v=JSON.parse(f.data);}catch{throw error('豆包工作流式事件格式异常。');}
+   if(process.env.DW_STREAM_DEBUG==='1'){
+    const ext=v?.content?.ext||v?.ext;
+    const mid=v?.model_id??ext?.model_id??v?.model??ext?.model;
+    console.log('[stream]',f.event,'model=',String(mid??''),'keys=',Object.keys(v||{}).slice(0,10).join(','));
+   }
    const code=Number(upstreamCode(v)||0);
    if(/ERR|^(?:error|gateway-error)$/i.test(f.event)||v?.error||code!==0||v?.extra?.decision||v?.decision){
     const e=vendorError(200,v);
