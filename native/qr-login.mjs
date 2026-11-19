@@ -26,7 +26,6 @@ const PARAMS = {
   region: 'CN',
 };
 const COOKIE_DOMAIN = '.doubao.com';
-const QR_TTL_MS = 180_000;
 const POLL_MIN_MS = 1_500;
 
 const fail = (status, message) => Object.assign(Error(message), {status});
@@ -34,6 +33,20 @@ const qs = obj => Object.entries(obj)
   .filter(([, v]) => v !== undefined && v !== null && v !== '')
   .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
   .join('&');
+
+// 官网页会话：先访问 /chat/ 取 ttwid 等基础 Cookie。
+// 缺 ttwid 的匿名会话轮询约 6-10 次后开始返回 2156「服务繁忙」（2026-11-19 对照实验：
+// 带 ttwid 连续 12 次 2s 轮询 error_code 全 0；不带则第 7 次起 2156）。
+function absorbCookies(jar, response) {
+  const list = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+  for (const raw of list) {
+    const [pair] = String(raw).split(';');
+    const i = pair.indexOf('=');
+    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+  }
+  return list;
+}
+const jarHeader = jar => [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
 
 // 解析 Set-Cookie → [{name,value,domain,path}]（只保留网关 normalizeSession 接受的形式）
 export function cookiesFromSetCookie(list = []) {
@@ -78,15 +91,29 @@ export function cookiesFromText(text) {
 
 export function createQrLogin({services, shutdown} = {}) {
   let state = null; // {token, image, expireAt, csrfCookie, lastPoll, status, message}
+  let pauseUntil = 0; // 上游限频后的静默期，期间不发起轮询
 
   const signalFor = () => {
     const timeout = AbortSignal.timeout(20_000);
     return shutdown ? AbortSignal.any([shutdown, timeout]) : timeout;
   };
 
-  async function start() {
+  let refreshes = 0;
+  const MAX_REFRESH = 5;
+
+  async function open() {
     if (state && Date.now() < state.expireAt && state.status !== 'expired')
       return {image: state.image, expireAt: state.expireAt, status: state.status};
+
+    const jar = new Map();
+    try {
+      const page = await fetch(`${ORIGIN}/chat/`, {
+        signal: signalFor(),
+        headers: {'User-Agent': UA, Accept: 'text/html'},
+      });
+      absorbCookies(jar, page);
+      await page.body?.cancel().catch(() => {});
+    } catch { /* 页面会话取不到时继续，只是更容易被限频 */ }
 
     const url = `${ORIGIN}/passport/web/get_qrcode/?${qs({next: NEXT, ...PARAMS})}`;
     let response;
@@ -94,12 +121,13 @@ export function createQrLogin({services, shutdown} = {}) {
       response = await fetch(url, {
         redirect: 'error',
         signal: signalFor(),
-        headers: {'User-Agent': UA, Referer: 'https://www.doubao.com/', Accept: 'application/json'},
+        headers: {'User-Agent': UA, Referer: 'https://www.doubao.com/', Accept: 'application/json',
+          ...(jar.size ? {Cookie: jarHeader(jar)} : {})},
       });
     } catch {
       throw fail(502, '连接豆包官网失败，请检查网络后重试。');
     }
-    const setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+    absorbCookies(jar, response);
     const payload = await response.json().catch(() => ({}));
     const data = payload?.data || {};
     if (!response.ok || Number(data.error_code) !== 0 || !data.token)
@@ -110,17 +138,21 @@ export function createQrLogin({services, shutdown} = {}) {
       : `data:image/png;base64,${String(data.qrcode || '').replace(/^data:image\/\w+;base64,/, '')}`;
     if (!image || image.length < 200) throw fail(502, '豆包未返回二维码图片。');
 
-    const csrfCookie = setCookies
-      .map(row => row.split(';')[0].trim())
-      .filter(row => row.startsWith('passport_csrf_token'))
-      .join('; ');
+    // SDK 轮询会带 x-tt-passport-csrf-token；缺失时上游返回 error_code=2035 非法请求
+    const csrfToken = decodeURIComponent(jar.get('passport_csrf_token') || '');
     const serverExpire = Number(data.expire_time) * 1000;
+    if (process.env.DW_QR_DEBUG === '1')
+      console.log('[qr] start expire_in_s=', Math.round((serverExpire - Date.now()) / 1000),
+        'token_suffix=', String(data.token || '').slice(-3));
     state = {
       token: String(data.token),
       image,
-      expireAt: Math.max(Number.isFinite(serverExpire) ? serverExpire : 0, Date.now() + 90_000),
-      csrfCookie,
+      // 上游 token 有效期实测 60s；到期自动换码（与官网 SDK 的 autoRefresh 一致）
+      expireAt: Number.isFinite(serverExpire) && serverExpire > Date.now() ? serverExpire : Date.now() + 60_000,
+      jar,
+      csrfToken,
       lastPoll: 0,
+      throttle: 0,
       status: 'new',
       message: '等待扫码',
       startedAt: Date.now(),
@@ -128,15 +160,32 @@ export function createQrLogin({services, shutdown} = {}) {
     return {image, expireAt: state.expireAt, status: 'new'};
   }
 
+  async function start() {
+    refreshes = 0;
+    return open();
+  }
+
+  async function autoRefresh() {
+    refreshes++;
+    const fresh = await open();
+    return {image: fresh.image, expireAt: fresh.expireAt, status: 'refreshed',
+      message: '二维码已自动刷新，请扫当前这张。', refreshes};
+  }
+
   async function poll() {
     if (!state) return {status: 'none', message: '没有进行中的二维码。'};
     if (state.status === 'confirmed') return {status: 'confirmed', message: state.message, account: state.account};
     if (Date.now() > state.expireAt && state.status !== 'scanned') {
       state = null;
+      if (refreshes < MAX_REFRESH) {
+        try { return await autoRefresh(); } catch { /* 刷新失败按过期处理 */ }
+      }
       return {status: 'expired', message: '二维码已过期，请重新生成。'};
     }
     if (Date.now() - state.lastPoll < POLL_MIN_MS)
       return {status: state.status, message: state.message};
+    if (Date.now() < pauseUntil)
+      return {status: state.status, message: '等待上游冷却…'};
     state.lastPoll = Date.now();
 
     const url = `${ORIGIN}/passport/web/check_qrconnect/?${qs({next: NEXT, ...PARAMS, token: state.token})}`;
@@ -147,33 +196,55 @@ export function createQrLogin({services, shutdown} = {}) {
         signal: signalFor(),
         headers: {
           'User-Agent': UA, Referer: 'https://www.doubao.com/', Accept: 'application/json',
-          ...(state.csrfCookie ? {Cookie: state.csrfCookie} : {}),
+          ...(state.jar.size ? {Cookie: jarHeader(state.jar)} : {}),
+          ...(state.csrfToken ? {'x-tt-passport-csrf-token': state.csrfToken} : {}),
         },
       });
     } catch {
       return {status: state.status, message: '网络波动，正在重试…'};
     }
-    const setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+    const setCookies = absorbCookies(state.jar, response);
     const payload = await response.json().catch(() => ({}));
     const data = payload?.data || {};
+    // 调试：只记录状态与错误码（不含 token / cookie）
+    if (process.env.DW_QR_DEBUG === '1')
+      console.log('[qr]', new Date().toISOString(), 'http='+response.status, 'code='+data.error_code,
+        'status='+JSON.stringify(data.status), 'has_redirect='+!!data.redirect_url,
+        'desc='+String(data.description||'').slice(0,60));
     if (Number(data.error_code) === 2156) {
+      state.throttle = Math.min((state.throttle || 0) + 1, 4);
+      pauseUntil = Date.now() + 8_000 * state.throttle;
       state.expireAt = Math.max(state.expireAt, Date.now() + 120_000);
-      return {status: state.status, message: '上游限频，稍候自动继续…'};
+      return {status: state.status, message: '上游限频，稍候自动继续…', raw: {error_code: 2156}};
+    }
+    state.throttle = 0;
+    if (Number(data.error_code) === 2035) {
+      state.expireAt = Math.max(state.expireAt, Date.now() + 120_000);
+      return {status: state.status, message: '二维码会话校验未通过，60 秒内可重试；持续失败请重新生成。',
+        raw: {error_code: 2035}};
+    }
+    if (Number(data.error_code) === 2046) {
+      // 扫码端 App 不被接受（官网文案要求使用「抖音 APP」扫码）
+      state.status = 'error';
+      state.message = '豆包返回 2046（为保证账号安全，暂不支持此操作）。请改用抖音 App 扫码，或重新生成二维码再试。';
+      return {status: 'error', message: state.message, raw: {error_code: 2046}};
     }
 
     const map = {1: 'new', 2: 'scanned', 3: 'confirmed', 4: 'expired'};
     let scan = map[data.status] || String(data.status || '');
     if (data.redirect_url && scan !== 'expired') scan = 'confirmed';
+    const raw = {status: data.status, error_code: data.error_code, has_redirect: !!data.redirect_url,
+      desc: String(data.description || '').slice(0, 80)};
 
     if (scan === 'new' || scan === '') {
       state.status = 'new'; state.message = '等待扫码';
-      return {status: 'new', message: state.message};
+      return {status: 'new', message: state.message, raw};
     }
     if (scan === 'scanned') {
       state.status = 'scanned';
       state.message = '已扫码，请在手机上确认登录';
       state.expireAt = Math.max(state.expireAt, Date.now() + 180_000);
-      return {status: 'scanned', message: state.message};
+      return {status: 'scanned', message: state.message, raw};
     }
     if (scan === 'refused') {
       state = null;
@@ -181,6 +252,9 @@ export function createQrLogin({services, shutdown} = {}) {
     }
     if (scan === 'expired') {
       state = null;
+      if (refreshes < MAX_REFRESH) {
+        try { return await autoRefresh(); } catch { /* 刷新失败按过期处理 */ }
+      }
       return {status: 'expired', message: '二维码已过期，请重新生成。'};
     }
     if (scan !== 'confirmed') return {status: state.status, message: state.message};
@@ -193,13 +267,17 @@ export function createQrLogin({services, shutdown} = {}) {
         const hop = await fetch(String(data.redirect_url), {
           redirect: 'manual',
           signal: signalFor(),
-          headers: {'User-Agent': UA, Referer: 'https://www.doubao.com/'},
+          headers: {'User-Agent': UA, Referer: 'https://www.doubao.com/',
+            ...(state.jar.size ? {Cookie: jarHeader(state.jar)} : {})},
         });
-        const extra = typeof hop.headers.getSetCookie === 'function' ? hop.headers.getSetCookie() : [];
+        const extra = absorbCookies(state.jar, hop);
         cookies = cookies.concat(cookiesFromSetCookie(extra));
         await hop.body?.cancel().catch(() => {});
       } catch { /* 补跳失败时用已有 Cookie 尝试 */ }
     }
+    // 兜底：会话 Cookie 落在 jar 里（轮询/跳转吸收过的都算）
+    const jarRows = [...state.jar].map(([name, value]) => ({name, value, domain: COOKIE_DOMAIN, path: '/'}));
+    cookies = cookies.concat(jarRows.filter(row => !cookies.some(c => c.name === row.name)));
     state.status = 'confirmed';
     if (!hasSession(cookies)) {
       state = null;
@@ -213,6 +291,7 @@ export function createQrLogin({services, shutdown} = {}) {
 
   function cancel() {
     state = null;
+    pauseUntil = 0;
     return {status: 'cancelled', message: '已取消本次扫码。'};
   }
 
@@ -222,6 +301,6 @@ export function createQrLogin({services, shutdown} = {}) {
     poll,
     cancel,
     // 面板关闭或请求中断时清空，避免残留二维码状态
-    dispose() { state = null; },
+    dispose() { state = null; pauseUntil = 0; },
   };
 }

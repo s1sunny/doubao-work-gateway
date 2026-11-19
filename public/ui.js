@@ -274,6 +274,10 @@ function qrShow(data){
   if(!data)return;
   if(data.image){const img=$('qr-image');img.src=data.image;img.hidden=false;$('qr-placeholder').hidden=true;}
   if(data.message)$('qr-status').textContent=data.message;
+  if(data.raw!==undefined){
+    const raw=$('qr-raw');raw.hidden=false;
+    raw.textContent='上游 '+new Date().toLocaleTimeString('zh-CN',{hour12:false})+' · '+JSON.stringify(data.raw);
+  }
   if(data.status==='scanned'){$('qr-cancel').hidden=false;}
   if(data.status==='confirmed'){
     qrStop();qrState='done';$('qr-start').disabled=false;$('qr-start').textContent='再扫一个账号';
@@ -281,6 +285,9 @@ function qrShow(data){
     $('qr-status').textContent=data.message||'接入成功，账号已刷新。';
     $('qr-image').hidden=true;$('qr-placeholder').hidden=false;$('qr-placeholder').textContent='已完成接入';
     void load();
+  }else if(data.status==='error'){
+    qrStop();qrState='idle';$('qr-start').disabled=false;$('qr-start').textContent='重新生成二维码';
+    $('qr-cancel').hidden=true;
   }else if(['expired','refused','none'].includes(data.status)){
     qrStop();qrState='idle';$('qr-start').disabled=false;$('qr-start').textContent='重新生成二维码';
     $('qr-cancel').hidden=true;$('qr-image').hidden=true;$('qr-placeholder').hidden=false;
@@ -297,7 +304,7 @@ $('qr-start').addEventListener('click',async()=>{
     qrStop();qrTimer=setInterval(async()=>{
       try{qrShow(await api('/api/login/qr/status',{}));}
       catch(error){qrStop();$('qr-status').textContent=error.message;}
-    },2000);
+    },3000);
   }catch(error){qrState='idle';$('qr-start').disabled=false;$('qr-start').textContent='生成二维码';$('qr-status').textContent=error.message;}
 });
 $('qr-cancel').addEventListener('click',async()=>{
@@ -305,6 +312,7 @@ $('qr-cancel').addEventListener('click',async()=>{
   try{await api('/api/login/qr/cancel',{});}catch{}
   qrReset('已取消本次扫码。');
 });
+$('login-help').addEventListener('close',()=>{qrStop();});
 $('cookie-submit').addEventListener('click',async()=>{
   const text=$('cookie-input').value.trim();
   $('cookie-status').hidden=false;
