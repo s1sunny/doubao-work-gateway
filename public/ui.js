@@ -314,12 +314,19 @@ $('qr-cancel').addEventListener('click',async()=>{
 });
 $('login-help').addEventListener('close',()=>{qrStop();});
 $('cookie-submit').addEventListener('click',async()=>{
-  const text=$('cookie-input').value.trim();
+  const fields={
+    sessionid:$('cookie-sessionid').value.trim(),
+    sessionid_ss:$('cookie-sessionid-ss').value.trim(),
+    ttwid:$('cookie-ttwid').value.trim(),
+    passport_csrf_token:$('cookie-csrf').value.trim(),
+    s_v_web_id:$('cookie-svwebid').value.trim(),
+  };
+  const extra=$('cookie-extra').value.trim();
   $('cookie-status').hidden=false;
-  if(!text){$('cookie-status').textContent='请先粘贴 Cookie。';return;}
+  if(!fields.sessionid&&!fields.sessionid_ss){$('cookie-status').textContent='请至少填写 sessionid。';return;}
   await act($('cookie-submit'),async()=>{
-    const result=await api('/api/login/cookie',{cookie:text,...(reloginId?{expectedId:reloginId}:{})});
-    $('cookie-input').value='';
+    const result=await api('/api/login/cookie',{fields,extra,...(reloginId?{expectedId:reloginId}:{})});
+    for(const id of ['cookie-sessionid','cookie-sessionid-ss','cookie-ttwid','cookie-csrf','cookie-svwebid','cookie-extra'])$(id).value='';
     $('cookie-status').textContent=(result.message||'接入成功。')+(result.name?' 账号：'+result.name:'');
     await load();
   },false,$('cookie-status'));

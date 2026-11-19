@@ -122,8 +122,15 @@
     </div>
     <div class="alt-card">
       <div class="alt-head"><span class="badge">手动 Cookie</span><strong>粘贴网页 Cookie</strong></div>
-      <textarea id="cookie-input" rows="3" spellcheck="false" autocomplete="off" placeholder="sessionid=...; sessionid_ss=...; ttwid=..."></textarea>
-      <p class="subtle">在已登录的 www.doubao.com 页面复制完整 Cookie（必须含 sessionid）。</p>
+      <div class="cookie-fields">
+        <label>sessionid <span>必填</span><input id="cookie-sessionid" spellcheck="false" autocomplete="off" placeholder="复制 Application → Cookies 里的 sessionid"></label>
+        <label>sessionid_ss <span>可选</span><input id="cookie-sessionid-ss" spellcheck="false" autocomplete="off" placeholder="通常与 sessionid 相同"></label>
+        <label>ttwid <span>可选</span><input id="cookie-ttwid" spellcheck="false" autocomplete="off" placeholder="不填则由网关重新获取"></label>
+        <label>passport_csrf_token <span>可选</span><input id="cookie-csrf" spellcheck="false" autocomplete="off" placeholder="可不填"></label>
+        <label>s_v_web_id <span>可选</span><input id="cookie-svwebid" spellcheck="false" autocomplete="off" placeholder="可不填"></label>
+      </div>
+      <label class="cookie-extra">其它字段（可选，格式 k=v; k=v）<textarea id="cookie-extra" rows="2" spellcheck="false" autocomplete="off" placeholder="odin_tt=...; msToken=..."></textarea></label>
+      <p class="subtle">在已登录的 www.doubao.com 页面打开开发者工具 → Application → Cookies，把对应值逐个填入即可，不用自己拼 Cookie 头。</p>
       <div class="dialog-actions"><button id="cookie-submit" class="primary" type="button">接入 Cookie</button></div>
       <p id="cookie-status" class="dialog-status" role="status" hidden></p>
     </div>

@@ -6,7 +6,7 @@ import {createNodeProfiles} from '../nodes.mjs';
 import {BrowserLogin} from '../browser-login.mjs';
 import {createCloudSync} from '../cloud-sync.mjs';
 import {readJson,sendJson,parseChat} from './model-api.mjs';
-import {createQrLogin,cookiesFromText} from './qr-login.mjs';
+import {createQrLogin,cookiesFromText,cookiesFromFields} from './qr-login.mjs';
 
 const assets=new URL('../public/',import.meta.url);
 const files={'/':['index.html','text/html; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],
@@ -121,7 +121,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
     case '/api/login/qr/cancel':return send(qr.cancel());
     case '/api/login/cookie':{
      if(g.remote)throw fail(409,'云端工作台请在本机粘贴 Cookie 后再同步账号。');
-     const cookies=cookiesFromText(d.cookie);
+     const cookies=d.fields?cookiesFromFields(d.fields,d.extra):cookiesFromText(d.cookie);
      const account=await services.importCookies({cookies,clientProfile:'web'},{expectedId:d.expectedId,signal:shutdown});
      return send({...account,message:account.updated?'登录已更新，账号已刷新。':'接入成功，账号已刷新。'});
     }

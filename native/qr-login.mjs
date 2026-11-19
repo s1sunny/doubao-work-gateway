@@ -84,7 +84,33 @@ export function cookiesFromText(text) {
     rows.push({name, value, domain: COOKIE_DOMAIN, path: '/'});
   }
   if (!rows.some(c => ['sessionid', 'sessionid_ss'].includes(c.name)))
-    throw fail(400, 'Cookie 里没有 sessionid / sessionid_ss，请确认复制的是已登录豆包网页的完整 Cookie。');
+    throw fail(400, '缺少 sessionid / sessionid_ss，请确认填写的是已登录豆包网页的 Cookie 值。');
+  if (rows.length > 200) throw fail(400, 'Cookie 条目过多。');
+  return rows;
+}
+
+// 面板按字段填写 → Cookie 列表（用户无需自己拼字符串）
+// fields: {sessionid, sessionid_ss, ttwid, passport_csrf_token, s_v_web_id, ...}
+// extra: 可选的 "k=v; k=v" 补充字段
+export function cookiesFromFields(fields = {}, extra = '') {
+  const rows = [];
+  const seen = new Set();
+  const push = (name, value) => {
+    if (!name || value === undefined || value === '') return;
+    if (!/^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/.test(name)) throw fail(400, `Cookie 名称不合法：${String(name).slice(0, 24)}`);
+    if (/[\x00-\x1f\x7f;,]/.test(value)) throw fail(400, `Cookie 值包含非法字符：${name.slice(0, 24)}`);
+    if (value.length > 16384) throw fail(400, `Cookie 值过长：${name.slice(0, 24)}`);
+    if (seen.has(name)) return;
+    seen.add(name);
+    rows.push({name, value: String(value), domain: COOKIE_DOMAIN, path: '/'});
+  };
+  if (fields && typeof fields === 'object' && !Array.isArray(fields))
+    for (const [name, value] of Object.entries(fields)) push(String(name).trim(), value);
+  if (extra) for (const row of cookiesFromText(extra)) {
+    if (!seen.has(row.name)) { seen.add(row.name); rows.push(row); }
+  }
+  if (!rows.some(c => ['sessionid', 'sessionid_ss'].includes(c.name)))
+    throw fail(400, '至少需要填写 sessionid（或 sessionid_ss）。');
   if (rows.length > 200) throw fail(400, 'Cookie 条目过多。');
   return rows;
 }
