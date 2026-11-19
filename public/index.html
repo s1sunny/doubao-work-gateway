@@ -111,6 +111,22 @@
   <div class="login-state-box"><span id="login-state-badge" class="badge">准备登录</span><p id="login-status" role="status">在浏览器完成登录后，将自动接入本机网关。</p><small id="login-expiry"></small></div>
   <div class="dialog-actions"><button id="launch-login" class="primary" type="button">打开浏览器登录<svg><use href="#i-arrow"/></svg></button><button id="confirm-login" class="primary" type="button" hidden>完成登录并接入</button><button id="cancel-login" class="secondary" type="button" hidden>取消本次登录</button><button id="sync-existing" class="secondary" type="button" hidden>同步现有账号到云端</button><button id="login-refresh" class="secondary" type="button">刷新账号</button></div>
   <p id="sync-result" class="dialog-status" role="status" hidden></p>
+  <section id="alt-login" class="alt-login">
+    <h3 class="alt-title">没有图形浏览器？用下面任意一种方式接入</h3>
+    <div class="alt-card">
+      <div class="alt-head"><span class="badge yes">扫码登录</span><strong>用手机扫码接入</strong></div>
+      <div class="qr-box"><img id="qr-image" alt="豆包登录二维码" width="176" height="176" hidden><div id="qr-placeholder">点击下方按钮生成二维码</div></div>
+      <p id="qr-status" class="dialog-status" role="status">生成后用豆包 / 抖音 App 扫码，并在手机上确认登录。</p>
+      <div class="dialog-actions"><button id="qr-start" class="primary" type="button">生成二维码</button><button id="qr-cancel" class="secondary" type="button" hidden>取消</button></div>
+    </div>
+    <div class="alt-card">
+      <div class="alt-head"><span class="badge">手动 Cookie</span><strong>粘贴网页 Cookie</strong></div>
+      <textarea id="cookie-input" rows="3" spellcheck="false" autocomplete="off" placeholder="sessionid=...; sessionid_ss=...; ttwid=..."></textarea>
+      <p class="subtle">在已登录的 www.doubao.com 页面复制完整 Cookie（必须含 sessionid）。</p>
+      <div class="dialog-actions"><button id="cookie-submit" class="primary" type="button">接入 Cookie</button></div>
+      <p id="cookie-status" class="dialog-status" role="status" hidden></p>
+    </div>
+  </section>
   <p id="login-privacy" class="login-privacy"><svg><use href="#i-shield"/></svg><span id="login-privacy-text">登录后将此豆包会话保存到本机网关。临时窗口在接入成功或 10 分钟超时后关闭，无需手动复制凭据。</span></p>
   <details id="local-login-details"><summary>登录和账号备份</summary><p>同一账号再次登录会更新登录会话。添加下一个账号时会使用新的临时浏览器资料。</p><p>没有图形浏览器？在另一台电脑登录后，可从工作台导出账号 JSON，再在此处导入并核验。</p></details>
 </dialog>

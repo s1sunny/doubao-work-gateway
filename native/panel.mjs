@@ -6,6 +6,7 @@ import {createNodeProfiles} from '../nodes.mjs';
 import {BrowserLogin} from '../browser-login.mjs';
 import {createCloudSync} from '../cloud-sync.mjs';
 import {readJson,sendJson,parseChat} from './model-api.mjs';
+import {createQrLogin,cookiesFromText} from './qr-login.mjs';
 
 const assets=new URL('../public/',import.meta.url);
 const files={'/':['index.html','text/html; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],
@@ -30,6 +31,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
    return account;
   },
  });
+ const qr=new createQrLogin({services,shutdown});
  async function loginStatus(){
   const remote=!!publicOrigin;
   return {...login.status(),platform:process.platform,browsers:remote?[]:await login.options(),nativeAvailable:false,
@@ -39,7 +41,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
  async function handler(req,res){
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cross-Origin-Resource-Policy','same-origin');
-  res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+  res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
   const g=gateway(),path=req.url;
   const send=v=>sendJson(res,200,v);
   try{
@@ -58,7 +60,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
     throw fail(404,'未找到此面板接口。');
    }
    if(req.method!=='POST'||(!authOff()&&req.headers.origin!==g.origin))throw fail(403,'面板操作来源不匹配。');
-   const d=await readJson(req,['/api/backup/preview','/api/nodes/preview','/api/accounts/import'].includes(path)?524288:8192);
+   const d=await readJson(req,['/api/backup/preview','/api/nodes/preview','/api/accounts/import','/api/login/cookie'].includes(path)?524288:8192);
    switch(path){
     case '/api/key':return send({key:services.keys.defaultKey()});
     case '/api/keys/create':return send(await services.keys.create(d));
@@ -108,6 +110,21 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
      await login.start(d.browserId,{destination:d.destination||'local',expectedId:d.expectedId,manual:typeof d.expectedId==='string'});return send(await loginStatus());
     case '/api/login/confirm':await login.confirm(d.id);return send(await loginStatus());
     case '/api/login/cancel':await login.cancel();return send(await loginStatus());
+    case '/api/login/qr':{
+     if(g.remote)throw fail(409,'云端工作台请在本机面板扫码后再同步账号。');
+     const r=await qr.start();return send({...r,active:qr.active});
+    }
+    case '/api/login/qr/status':{
+     if(g.remote)throw fail(409,'云端工作台不支持本地扫码。');
+     return send(await qr.poll());
+    }
+    case '/api/login/qr/cancel':return send(qr.cancel());
+    case '/api/login/cookie':{
+     if(g.remote)throw fail(409,'云端工作台请在本机粘贴 Cookie 后再同步账号。');
+     const cookies=cookiesFromText(d.cookie);
+     const account=await services.importCookies({cookies},{expectedId:d.expectedId,signal:shutdown});
+     return send({...account,message:account.updated?'登录已更新，账号已刷新。':'接入成功，账号已刷新。'});
+    }
     case '/api/verification/restore':return send(await services.restore(d.id,d.confirmed));
     case '/api/verification/retest':{
      const requestId='dw-'+randomUUID(),body=parseChat({model:d.model,messages:[{role:'user',content:'请只回复 OK'}]});
@@ -128,5 +145,5 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
    else res.destroy();
   }
  }
- return {handler,async dispose(){nodes.clear();await login.dispose();}};
+ return {handler,async dispose(){nodes.clear();qr.dispose();await login.dispose();}};
 }

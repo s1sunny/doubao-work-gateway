@@ -52,6 +52,7 @@ function renderLogin(data){
   $('login-description').textContent=remote?'由你电脑上的浏览器完成登录，账号自动保存到云端。':toCloud?'只同步这次登录的豆包账号；日常浏览器账号保持原样。':'使用熟悉的浏览器登录。每个账号单独开窗，日常浏览器中的账号保持原样。';
   $('cloud-login-help').hidden=!remote;
   for(const id of ['login-browser','login-browser-label','login-privacy'])$(id).hidden=remote;
+  $('alt-login').hidden=remote;
   $('local-login-details').hidden=remote||toCloud;
   document.querySelector('.login-steps').hidden=remote;
   document.querySelector('.login-state-box').hidden=remote;
@@ -258,6 +259,62 @@ $('confirm-login').addEventListener('click',async()=>{
 $('cancel-login').addEventListener('click',async()=>{
   await act($('cancel-login'),async()=>{renderLogin(await api('/api/login/cancel',{}));},false,$('login-status'));
   void refreshLogin();
+});
+
+let qrTimer=0,qrState='idle';
+function qrStop(){if(qrTimer){clearInterval(qrTimer);qrTimer=0;}}
+function qrReset(message='生成后用豆包 / 抖音 App 扫码，并在手机上确认登录。'){
+  const img=$('qr-image');img.hidden=true;img.removeAttribute('src');
+  $('qr-placeholder').hidden=false;$('qr-placeholder').textContent='点击下方按钮生成二维码';
+  $('qr-status').textContent=message;$('qr-start').disabled=false;
+  $('qr-start').textContent=qrState==='idle'?'生成二维码':'重新生成二维码';
+  $('qr-cancel').hidden=true;qrState='idle';
+}
+function qrShow(data){
+  if(!data)return;
+  if(data.image){const img=$('qr-image');img.src=data.image;img.hidden=false;$('qr-placeholder').hidden=true;}
+  if(data.message)$('qr-status').textContent=data.message;
+  if(data.status==='scanned'){$('qr-cancel').hidden=false;}
+  if(data.status==='confirmed'){
+    qrStop();qrState='done';$('qr-start').disabled=false;$('qr-start').textContent='再扫一个账号';
+    $('qr-cancel').hidden=true;
+    $('qr-status').textContent=data.message||'接入成功，账号已刷新。';
+    $('qr-image').hidden=true;$('qr-placeholder').hidden=false;$('qr-placeholder').textContent='已完成接入';
+    void load();
+  }else if(['expired','refused','none'].includes(data.status)){
+    qrStop();qrState='idle';$('qr-start').disabled=false;$('qr-start').textContent='重新生成二维码';
+    $('qr-cancel').hidden=true;$('qr-image').hidden=true;$('qr-placeholder').hidden=false;
+    $('qr-placeholder').textContent=data.status==='expired'?'二维码已过期':'二维码已失效';
+  }
+}
+$('qr-start').addEventListener('click',async()=>{
+  if(qrState==='starting')return;
+  qrState='starting';$('qr-start').disabled=true;$('qr-start').textContent='正在取码…';
+  try{
+    const data=await api('/api/login/qr',{});
+    qrShow(data);$('qr-start').textContent='二维码已生成';$('qr-start').disabled=true;
+    $('qr-cancel').hidden=false;
+    qrStop();qrTimer=setInterval(async()=>{
+      try{qrShow(await api('/api/login/qr/status',{}));}
+      catch(error){qrStop();$('qr-status').textContent=error.message;}
+    },2000);
+  }catch(error){qrState='idle';$('qr-start').disabled=false;$('qr-start').textContent='生成二维码';$('qr-status').textContent=error.message;}
+});
+$('qr-cancel').addEventListener('click',async()=>{
+  qrStop();
+  try{await api('/api/login/qr/cancel',{});}catch{}
+  qrReset('已取消本次扫码。');
+});
+$('cookie-submit').addEventListener('click',async()=>{
+  const text=$('cookie-input').value.trim();
+  $('cookie-status').hidden=false;
+  if(!text){$('cookie-status').textContent='请先粘贴 Cookie。';return;}
+  await act($('cookie-submit'),async()=>{
+    const result=await api('/api/login/cookie',{cookie:text,...(reloginId?{expectedId:reloginId}:{})});
+    $('cookie-input').value='';
+    $('cookie-status').textContent=(result.message||'接入成功。')+(result.name?' 账号：'+result.name:'');
+    await load();
+  },false,$('cookie-status'));
 });
 $('login-refresh').addEventListener('click',()=>act($('login-refresh'),async()=>{const ok=await load();$('login-status').textContent=ok?'账号列表已更新，已接入 '+snapshot.accounts.length+' 个豆包工作账号。':'网关暂未连接，请检查启动终端。';},false));
 for(const id of ['copy-base','copy-quick-base'])$(id).addEventListener('click',()=>act($(id),()=>copy($('api-base').textContent,'Base URL 已复制。'),false));
