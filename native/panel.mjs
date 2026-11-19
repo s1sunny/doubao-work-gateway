@@ -122,7 +122,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
     case '/api/login/cookie':{
      if(g.remote)throw fail(409,'云端工作台请在本机粘贴 Cookie 后再同步账号。');
      const cookies=cookiesFromText(d.cookie);
-     const account=await services.importCookies({cookies},{expectedId:d.expectedId,signal:shutdown});
+     const account=await services.importCookies({cookies,clientProfile:'web'},{expectedId:d.expectedId,signal:shutdown});
      return send({...account,message:account.updated?'登录已更新，账号已刷新。':'接入成功，账号已刷新。'});
     }
     case '/api/verification/restore':return send(await services.restore(d.id,d.confirmed));

@@ -205,7 +205,7 @@ export function createQrLogin({services, shutdown} = {}) {
       state = null;
       throw fail(502, '扫码已确认，但豆包没有下发登录会话，请重新扫码。');
     }
-    const account = await services.importCookies({cookies}, {signal: shutdown});
+    const account = await services.importCookies({cookies, clientProfile: 'web'}, {signal: shutdown});
     state.account = account;
     state.message = account.updated ? '登录已更新，账号已刷新。' : '接入成功，账号已刷新。';
     return {status: 'confirmed', message: state.message, account};
