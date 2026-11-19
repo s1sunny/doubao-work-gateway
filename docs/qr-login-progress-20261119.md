@@ -52,7 +52,7 @@
 
 用户反馈：网页登录后 `sessionid` 与 `sessionid_ss` 值相同、不想自己拼 Cookie 头。
 
-- 面板改为**分字段填写**：`sessionid`（必填）、`sessionid_ss`、`ttwid`、`passport_csrf_token`、`s_v_web_id`，外加「其它字段」`k=v; k=v` 补充框。
+- 面板最终只保留 **`sessionid` 单字段**（经实测：只填 sessionid 即可，网关自行补 ttwid/web_id 等设备上下文；UI 已按此简化）。后端仍兼容多字段对象与整串 Cookie 两种入参。
 - 后端 `cookiesFromFields()` 负责校验 + 拼装 Cookie 列表，再走 `services.importCookies({cookies, clientProfile:'web'})`。
 - `sessionid` 与 `sessionid_ss` 相同是**正常现象**（字节系双写），两个都填同一个值即可；只填 `sessionid` 也能过（网关会自行访问官网补 `ttwid`、`web_id` 等设备上下文）。
 - 兼容旧的整串 Cookie：`POST /api/login/cookie {cookie: "..."}` 仍可用。
