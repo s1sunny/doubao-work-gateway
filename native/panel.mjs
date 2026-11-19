@@ -16,6 +16,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
  browserLoginOptions={},cloudConfigPath,cloudFetch}){
  const nodes=await createNodeProfiles({path:join(dir,'doubao-node-profiles.json')});
  const gateway=()=>ingress({port:originForPort(),publicOrigin,proxyToken});
+ const authOff=()=>process.env.DW_PANEL_AUTH==='off';
  const apiBase=()=> (publicOrigin||modelOrigin())+'/v1';
  const cloudSync=cloudConfigPath?createCloudSync({configPath:cloudConfigPath,fetchImpl:cloudFetch,
   exportAccounts:services.exportAccounts}):null;
@@ -42,12 +43,13 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
   const g=gateway(),path=req.url;
   const send=v=>sendJson(res,200,v);
   try{
-   if(!g.accepts(req)||req.headers['sec-fetch-site']==='cross-site')throw fail(403,'只接受受信任的面板入口。');
+   if(authOff()){}
+   else if(!g.accepts(req)||req.headers['sec-fetch-site']==='cross-site')throw fail(403,'只接受受信任的面板入口。');
    if(req.method==='GET'&&Object.hasOwn(files,path)){
     const [file,type]=files[path];res.writeHead(200,{'Content-Type':type});
     createReadStream(new URL(file,assets)).on('error',()=>res.destroy()).pipe(res);return;
    }
-   if(req.headers['x-doubao-panel']!=='1'||req.headers.origin&&req.headers.origin!==g.origin)throw fail(403,'面板请求验证失败。');
+   if(!authOff()&&(req.headers['x-doubao-panel']!=='1'||req.headers.origin&&req.headers.origin!==g.origin))throw fail(403,'面板请求验证失败。');
    if(req.method==='GET'){
     if(path==='/api/snapshot')return send({...services.snapshot(),capabilities:services.capabilities,native:true,apiBase:apiBase(),deployment:g.remote?'cloud':'local',loginAvailable:!g.remote&&(await login.options()).length>0});
     if(path==='/api/login-status')return send(await loginStatus());
@@ -55,7 +57,7 @@ export async function createNativePanel({dir,tmpRoot,services,originForPort,mode
     if(path==='/api/nodes')return send(await nodes.list());
     throw fail(404,'未找到此面板接口。');
    }
-   if(req.method!=='POST'||req.headers.origin!==g.origin)throw fail(403,'面板操作来源不匹配。');
+   if(req.method!=='POST'||(!authOff()&&req.headers.origin!==g.origin))throw fail(403,'面板操作来源不匹配。');
    const d=await readJson(req,['/api/backup/preview','/api/nodes/preview','/api/accounts/import'].includes(path)?524288:8192);
    switch(path){
     case '/api/key':return send({key:services.keys.defaultKey()});

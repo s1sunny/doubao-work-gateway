@@ -17,11 +17,11 @@ export async function startNative({dir,tmpRoot=join(dir,'browser-tmp'),modelPort
  const store=await openStore({dir:resolve(dir)}),abort=new AbortController();
  let services,panel,modelServer,panelServer,tick,interval,stopping;
  const sockets=new Set();
- function listen(server,port){
+ function listen(server,port,host='127.0.0.1'){
   server.on('connection',s=>{sockets.add(s);s.once('close',()=>sockets.delete(s));});
   server.on('clientError',(_e,s)=>s.destroy());
   server.requestTimeout=30000;server.headersTimeout=15000;server.maxHeadersCount=60;
-  return new Promise((ok,bad)=>{server.once('error',bad);server.listen(port,'127.0.0.1',()=>{server.removeListener('error',bad);ok();});});
+  return new Promise((ok,bad)=>{server.once('error',bad);server.listen(port,host,()=>{server.removeListener('error',bad);ok();});});
  }
  const portOf=server=>server?.address()?.port;
  const origin=server=>'http://127.0.0.1:'+portOf(server);
@@ -44,7 +44,7 @@ export async function startNative({dir,tmpRoot=join(dir,'browser-tmp'),modelPort
   panel=await createNativePanel({dir,tmpRoot,services,originForPort:()=>portOf(panelServer),modelOrigin:()=>origin(modelServer),publicOrigin,proxyToken,shutdown:abort.signal,
    browserLoginOptions,cloudConfigPath,cloudFetch});
   panelServer=createServer(panel.handler);
-  await listen(panelServer,panelPort);
+  await listen(panelServer,panelPort,process.env.DW_PANEL_BIND||'127.0.0.1');
   if(timer){interval=setInterval(()=>{if(!tick)tick=services.tick({signal:abort.signal}).catch(()=>{}).finally(()=>{tick=null;});},25000);interval.unref();}
   return {services,stop,modelOrigin:origin(modelServer),panelOrigin:origin(panelServer),modelPort:portOf(modelServer),panelPort:portOf(panelServer)};
  }catch(e){await stop();throw e;}
